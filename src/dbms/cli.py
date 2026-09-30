@@ -9,20 +9,39 @@ from dbms.db import SessionLocal
 from dbms.models import Comment, Post, Reaction, User
 from dbms.post_service import create_post, delete_post, update_post
 from dbms.reaction_service import change_reaction
+from dbms.schemas import (
+    CommentCreate,
+    CommentUpdate,
+    IdInput,
+    PageInput,
+    PostCreate,
+    PostUpdate,
+    ReactionCreate,
+    UserCreate,
+    UserUpdate,
+)
 
 
 async def show_db_state():
     async with SessionLocal() as session:
-        users_result = await session.execute(select(User).order_by(User.id))
+        users_result = await session.execute(
+            select(User).order_by(User.id)
+        )
         users = users_result.scalars().all()
 
-        posts_result = await session.execute(select(Post).order_by(Post.id))
+        posts_result = await session.execute(
+            select(Post).order_by(Post.id)
+        )
         posts = posts_result.scalars().all()
 
-        reactions_result = await session.execute(select(Reaction).order_by(Reaction.id))
+        reactions_result = await session.execute(
+            select(Reaction).order_by(Reaction.id)
+        )
         reactions = reactions_result.scalars().all()
 
-        comments_result = await session.execute(select(Comment).order_by(Comment.id))
+        comments_result = await session.execute(
+            select(Comment).order_by(Comment.id)
+        )
         comments = comments_result.scalars().all()
 
         print("\n========== USERS ==========\n")
@@ -30,6 +49,7 @@ async def show_db_state():
         for user in users:
             print(f"User ID: {user.id}")
             print(f"Name: {user.name}")
+            print(f"Email: {user.email}")
             print("-" * 35)
 
         print("\n========== POSTS ==========\n")
@@ -62,11 +82,26 @@ async def show_db_state():
             print("-" * 35)
 
 
-async def create_user(username, email):
+# ============================================================
+# USERS
+# ============================================================
+
+
+async def create_user(username: str, email: str):
+    try:
+        user_data = UserCreate(
+            name=username,
+            email=email,
+        )
+    except ValueError as error:
+        print("Invalid user data.")
+        print(error)
+        return
+
     async with SessionLocal() as session:
         user = User(
-            name=username.strip().lower(),
-            email=email.strip().lower(),
+            name=user_data.name,
+            email=str(user_data.email),
         )
 
         session.add(user)
@@ -83,6 +118,7 @@ async def create_user(username, email):
         except IntegrityError:
             await session.rollback()
             print("User with this name and email already exists.")
+
 
 async def view_users():
     async with SessionLocal() as session:
@@ -106,11 +142,16 @@ async def view_users():
             print("-" * 35)
 
 
-
 async def update_user(user_id: int):
+    try:
+        id_data = IdInput(id=user_id)
+    except ValueError:
+        print("User ID must be a positive number.")
+        return
+
     async with SessionLocal() as session:
         result = await session.execute(
-            select(User).where(User.id == user_id)
+            select(User).where(User.id == id_data.id)
         )
 
         user = result.scalar_one_or_none()
@@ -119,15 +160,28 @@ async def update_user(user_id: int):
             print("User does not exist.")
             return
 
-        new_name = input("Enter new name: ").strip().lower()
-        new_email = input("Enter new email: ").strip().lower()
-        # Check if the new name is the same as the current name
-        if new_name == user.name or new_email == user.email:
-            print("No changes made. Please update correctly.")
+        new_name = input("Enter new name: ")
+        new_email = input("Enter new email: ")
+
+        try:
+            user_data = UserUpdate(
+                name=new_name,
+                email=new_email,
+            )
+        except ValueError as error:
+            print("Invalid user data.")
+            print(error)
             return
 
-        user.name = new_name
-        user.email=new_email
+        if (
+            user_data.name.lower() == user.name.lower()
+            and str(user_data.email).lower() == user.email.lower()
+        ):
+            print("No changes made.")
+            return
+
+        user.name = user_data.name
+        user.email = str(user_data.email)
 
         try:
             await session.commit()
@@ -135,13 +189,21 @@ async def update_user(user_id: int):
 
         except IntegrityError:
             await session.rollback()
-            print("Another user already exists. Please update correctly.")
+            print(
+                "Another user already exists with this name and email."
+            )
 
 
 async def delete_user(user_id: int):
+    try:
+        id_data = IdInput(id=user_id)
+    except ValueError:
+        print("User ID must be a positive number.")
+        return
+
     async with SessionLocal() as session:
         result = await session.execute(
-            select(User).where(User.id == user_id)
+            select(User).where(User.id == id_data.id)
         )
 
         user = result.scalar_one_or_none()
@@ -151,7 +213,7 @@ async def delete_user(user_id: int):
             return
 
         result = await session.execute(
-            select(Post.id).where(Post.user_id == user_id)
+            select(Post.id).where(Post.user_id == id_data.id)
         )
 
         if result.first():
@@ -159,7 +221,7 @@ async def delete_user(user_id: int):
             return
 
         result = await session.execute(
-            select(Comment.id).where(Comment.user_id == user_id)
+            select(Comment.id).where(Comment.user_id == id_data.id)
         )
 
         if result.first():
@@ -167,7 +229,7 @@ async def delete_user(user_id: int):
             return
 
         result = await session.execute(
-            select(Reaction.id).where(Reaction.user_id == user_id)
+            select(Reaction.id).where(Reaction.user_id == id_data.id)
         )
 
         if result.first():
@@ -179,34 +241,35 @@ async def delete_user(user_id: int):
 
         print("User deleted successfully.")
 
-def validate_email(email: str) -> bool:
-    email = email.strip()
 
-    if " " in email:
-        return False
+# ============================================================
+# POSTS
+# ============================================================
 
-    if "@" not in email:
-        return False
-
-    username, domain = email.split("@", 1)
-
-    if not username or not domain:
-        return False
-
-    return "." in domain
 
 async def create_post_command(
     user_id: int,
     image_path: str,
     caption: str | None,
 ):
+    try:
+        post_data = PostCreate(
+            user_id=user_id,
+            image_path=image_path,
+            caption=caption,
+        )
+    except ValueError as error:
+        print("Invalid post data.")
+        print(error)
+        return
+
     async with SessionLocal() as session:
         try:
             post = await create_post(
                 session=session,
-                user_id=user_id,
-                image_path=image_path,
-                caption=caption,
+                user_id=post_data.user_id,
+                image_path=post_data.image_path,
+                caption=post_data.caption,
             )
 
             print("Post created successfully.")
@@ -218,16 +281,27 @@ async def create_post_command(
         except ValueError as error:
             print(error)
 
+
 async def update_post_command(
     post_id: int,
     caption: str | None,
 ):
+    try:
+        post_data = PostUpdate(
+            post_id=post_id,
+            caption=caption,
+        )
+    except ValueError as error:
+        print("Invalid post data.")
+        print(error)
+        return
+
     async with SessionLocal() as session:
         try:
             post = await update_post(
                 session=session,
-                post_id=post_id,
-                caption=caption,
+                post_id=post_data.post_id,
+                caption=post_data.caption,
             )
 
             print("Post updated successfully.")
@@ -239,17 +313,22 @@ async def update_post_command(
 
 
 async def list_posts(page: int):
-    posts_per_page = 10
-
-    if page < 1:
-        print("Page number must be 1 or greater.")
+    try:
+        page_data = PageInput(page=page)
+    except ValueError as error:
+        print("Invalid page number.")
+        print(error)
         return
 
-    offset = (page - 1) * posts_per_page
+    posts_per_page = 10
+    offset = (page_data.page - 1) * posts_per_page
 
     async with SessionLocal() as session:
         result = await session.execute(
-            select(Post).order_by(Post.id).limit(posts_per_page).offset(offset)
+            select(Post)
+            .order_by(Post.id)
+            .limit(posts_per_page)
+            .offset(offset)
         )
 
         posts = result.scalars().all()
@@ -258,7 +337,7 @@ async def list_posts(page: int):
             print("No posts found on this page.")
             return
 
-        print(f"\n========== PAGE {page} ==========\n")
+        print(f"\n========== PAGE {page_data.page} ==========\n")
 
         for post in posts:
             print(f"Post ID: {post.id}")
@@ -270,13 +349,21 @@ async def list_posts(page: int):
 
 
 async def show_post(post_id: int):
+    try:
+        id_data = IdInput(id=post_id)
+    except ValueError:
+        print("Post ID must be a positive number.")
+        return
+
     async with SessionLocal() as session:
-        result = await session.execute(select(Post).where(Post.id == post_id))
+        result = await session.execute(
+            select(Post).where(Post.id == id_data.id)
+        )
 
         post = result.scalar_one_or_none()
 
         if post is None:
-            print(f"Post {post_id} was not found.")
+            print(f"Post {id_data.id} was not found.")
             return
 
         print("\n========== POST ==========\n")
@@ -289,41 +376,218 @@ async def show_post(post_id: int):
         print(f"Created: {post.created_at}")
 
 
+async def delete_post_command(post_id: int):
+    try:
+        id_data = IdInput(id=post_id)
+    except ValueError:
+        print("Post ID must be a positive number.")
+        return
+
+    async with SessionLocal() as session:
+        try:
+            await delete_post(
+                session=session,
+                post_id=id_data.id,
+            )
+
+            print("Post deleted successfully.")
+
+        except ValueError as error:
+            print(error)
+
+
+# ============================================================
+# COMMENTS
+# ============================================================
+
+
+async def add_comment(
+    post_id: int,
+    user_id: int,
+    comment_text: str,
+):
+    try:
+        comment_data = CommentCreate(
+            post_id=post_id,
+            user_id=user_id,
+            comment_text=comment_text,
+        )
+    except ValueError as error:
+        print("Invalid comment data.")
+        print(error)
+        return
+
+    async with SessionLocal() as session:
+        try:
+            comment = await create_comment(
+                session=session,
+                user_id=comment_data.user_id,
+                post_id=comment_data.post_id,
+                comment_text=comment_data.comment_text,
+            )
+
+            print("Comment added successfully.")
+            print(f"Comment ID: {comment.id}")
+            print(f"User ID: {comment.user_id}")
+            print(f"Post ID: {comment.post_id}")
+            print(f"Comment: {comment.comment_text}")
+
+        except ValueError as error:
+            print(error)
+
+
+async def update_comment_command(
+    comment_id: int,
+    comment_text: str,
+):
+    try:
+        comment_data = CommentUpdate(
+            comment_id=comment_id,
+            comment_text=comment_text,
+        )
+    except ValueError as error:
+        print("Invalid comment data.")
+        print(error)
+        return
+
+    async with SessionLocal() as session:
+        try:
+            comment = await update_comment(
+                session=session,
+                comment_id=comment_data.comment_id,
+                comment_text=comment_data.comment_text,
+            )
+
+            print("Comment updated successfully.")
+            print(f"Comment ID: {comment.id}")
+            print(f"Comment: {comment.comment_text}")
+
+        except ValueError as error:
+            print(error)
+
+
+async def delete_comment_command(comment_id: int):
+    try:
+        id_data = IdInput(id=comment_id)
+    except ValueError:
+        print("Comment ID must be a positive number.")
+        return
+
+    async with SessionLocal() as session:
+        try:
+            await delete_comment(
+                session=session,
+                comment_id=id_data.id,
+            )
+
+            print("Comment deleted successfully.")
+
+        except ValueError as error:
+            print(error)
+
+
+async def show_comments(post_id: int):
+    try:
+        id_data = IdInput(id=post_id)
+    except ValueError:
+        print("Post ID must be a positive number.")
+        return
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Comment)
+            .where(Comment.post_id == id_data.id)
+            .order_by(Comment.id)
+        )
+
+        comments = result.scalars().all()
+
+        if not comments:
+            print("No comments found.")
+            return
+
+        print(
+            f"\n========== COMMENTS FOR POST {id_data.id} ==========\n"
+        )
+
+        for comment in comments:
+            print(f"Comment ID: {comment.id}")
+            print(f"User ID: {comment.user_id}")
+            print(f"Comment: {comment.comment_text}")
+            print(f"Created: {comment.created_at}")
+            print("-" * 35)
+
+
+# ============================================================
+# REACTIONS
+# ============================================================
+
+
 async def like_post(post_id: int, user_id: int):
+    try:
+        reaction_data = ReactionCreate(
+            user_id=user_id,
+            post_id=post_id,
+            reaction_type="LIKE",
+        )
+    except ValueError as error:
+        print("Invalid reaction data.")
+        print(error)
+        return
+
     async with SessionLocal() as session:
         try:
             result = await change_reaction(
                 session=session,
-                user_id=user_id,
-                post_id=post_id,
-                reaction_type="LIKE",
+                user_id=reaction_data.user_id,
+                post_id=reaction_data.post_id,
+                reaction_type=reaction_data.reaction_type,
             )
 
             print(f"User {user_id}: {result}")
 
         except ValueError as error:
-            print(f" {error}")
+            print(error)
 
 
 async def dislike_post(post_id: int, user_id: int):
+    try:
+        reaction_data = ReactionCreate(
+            user_id=user_id,
+            post_id=post_id,
+            reaction_type="DISLIKE",
+        )
+    except ValueError as error:
+        print("Invalid reaction data.")
+        print(error)
+        return
+
     async with SessionLocal() as session:
         try:
             result = await change_reaction(
                 session=session,
-                user_id=user_id,
-                post_id=post_id,
-                reaction_type="DISLIKE",
+                user_id=reaction_data.user_id,
+                post_id=reaction_data.post_id,
+                reaction_type=reaction_data.reaction_type,
             )
 
             print(f"User {user_id}: {result}")
 
         except ValueError as error:
-            print(f"{error}")
+            print(error)
+
+
 async def view_reactions(post_id: int):
+    try:
+        id_data = IdInput(id=post_id)
+    except ValueError:
+        print("Post ID must be a positive number.")
+        return
+
     async with SessionLocal() as session:
         result = await session.execute(
             select(Reaction)
-            .where(Reaction.post_id == post_id)
+            .where(Reaction.post_id == id_data.id)
             .order_by(Reaction.id)
         )
 
@@ -333,7 +597,9 @@ async def view_reactions(post_id: int):
             print("No reactions found.")
             return
 
-        print(f"\n========== REACTIONS FOR POST {post_id} ==========\n")
+        print(
+            f"\n========== REACTIONS FOR POST {id_data.id} ==========\n"
+        )
 
         for reaction in reactions:
             print(f"Reaction ID: {reaction.id}")
@@ -343,12 +609,20 @@ async def view_reactions(post_id: int):
             print(f"Created: {reaction.created_at}")
             print("-" * 35)
 
+
 async def remove_reaction(post_id: int, user_id: int):
+    try:
+        post_data = IdInput(id=post_id)
+        user_data = IdInput(id=user_id)
+    except ValueError:
+        print("Post ID and user ID must be positive numbers.")
+        return
+
     async with SessionLocal() as session:
         result = await session.execute(
             select(Reaction).where(
-                Reaction.post_id == post_id,
-                Reaction.user_id == user_id,
+                Reaction.post_id == post_data.id,
+                Reaction.user_id == user_data.id,
             )
         )
 
@@ -359,7 +633,7 @@ async def remove_reaction(post_id: int, user_id: int):
             return
 
         result = await session.execute(
-            select(Post).where(Post.id == post_id)
+            select(Post).where(Post.id == post_data.id)
         )
 
         post = result.scalar_one_or_none()
@@ -379,90 +653,23 @@ async def remove_reaction(post_id: int, user_id: int):
         print("Reaction removed successfully.")
 
 
-async def delete_post_command(post_id: int):
-    async with SessionLocal() as session:
+# ============================================================
+# INPUT
+# ============================================================
+
+
+def get_integer_input(message: str) -> int:
+    while True:
         try:
-            await delete_post(
-                session=session,
-                post_id=post_id,
-            )
+            return int(input(message))
+        except ValueError:
+            print("Please enter a valid number.")
 
-            print("Post deleted successfully.")
 
-        except ValueError as error:
-            print(error)
+# ============================================================
+# MAIN MENU
+# ============================================================
 
-async def add_comment(post_id: int, user_id: int, comment_text: str):
-    async with SessionLocal() as session:
-        try:
-            comment = await create_comment(
-                session=session,
-                user_id=user_id,
-                post_id=post_id,
-                comment_text=comment_text,
-            )
-
-            print("Comment added successfully.")
-            print(f"Comment ID: {comment.id}")
-            print(f"User ID: {comment.user_id}")
-            print(f"Post ID: {comment.post_id}")
-            print(f"Comment: {comment.comment_text}")
-
-        except ValueError as error:
-            print(f" {error}")
-
-async def update_comment_command(
-    comment_id: int,
-    comment_text: str,
-):
-    async with SessionLocal() as session:
-        try:
-            comment = await update_comment(
-                session=session,
-                comment_id=comment_id,
-                comment_text=comment_text,
-            )
-
-            print("Comment updated successfully.")
-            print(f"Comment ID: {comment.id}")
-            print(f"Comment: {comment.comment_text}")
-
-        except ValueError as error:
-            print(error)
-
-async def delete_comment_command(comment_id: int):
-    async with SessionLocal() as session:
-        try:
-            await delete_comment(
-                session=session,
-                comment_id=comment_id,
-            )
-
-            print("Comment deleted successfully.")
-
-        except ValueError as error:
-            print(error)
-
-async def show_comments(post_id: int):
-    async with SessionLocal() as session:
-        result = await session.execute(
-            select(Comment).where(Comment.post_id == post_id).order_by(Comment.id)
-        )
-
-        comments = result.scalars().all()
-
-        if not comments:
-            print("No comments found.")
-            return
-
-        print(f"\n========== COMMENTS FOR POST {post_id} ==========\n")
-
-        for comment in comments:
-            print(f"Comment ID: {comment.id}")
-            print(f"User ID: {comment.user_id}")
-            print(f"Comment: {comment.comment_text}")
-            print(f"Created: {comment.created_at}")
-            print("-" * 35)
 
 async def main():
     while True:
@@ -501,12 +708,8 @@ async def main():
         # ---------------- USERS ----------------
 
         if choice == "1":
-            username = input("Enter user name: ").strip()
-            email = input("Enter email: ").strip().lower()
-
-            if not validate_email(email):
-                print("Invalid email address.")
-                continue
+            username = input("Enter user name: ")
+            email = input("Enter email: ")
 
             await create_user(username, email)
 
@@ -514,17 +717,17 @@ async def main():
             await view_users()
 
         elif choice == "3":
-            user_id = int(input("Enter user ID: "))
+            user_id = get_integer_input("Enter user ID: ")
             await update_user(user_id)
 
         elif choice == "4":
-            user_id = int(input("Enter user ID: "))
+            user_id = get_integer_input("Enter user ID: ")
             await delete_user(user_id)
 
         # ---------------- POSTS ----------------
 
         elif choice == "5":
-            user_id = int(input("Enter user ID: "))
+            user_id = get_integer_input("Enter user ID: ")
 
             image_path = (
                 input("Enter image path: ")
@@ -532,7 +735,7 @@ async def main():
                 .strip('"')
             )
 
-            caption = input("Enter caption: ").strip()
+            caption = input("Enter caption: ")
 
             await create_post_command(
                 user_id,
@@ -541,12 +744,12 @@ async def main():
             )
 
         elif choice == "6":
-            page = int(input("Enter page number: "))
+            page = get_integer_input("Enter page number: ")
             await list_posts(page)
 
         elif choice == "7":
-            post_id = int(input("Enter post ID: "))
-            caption = input("Enter new caption: ").strip()
+            post_id = get_integer_input("Enter post ID: ")
+            caption = input("Enter new caption: ")
 
             await update_post_command(
                 post_id,
@@ -554,15 +757,15 @@ async def main():
             )
 
         elif choice == "8":
-            post_id = int(input("Enter post ID: "))
+            post_id = get_integer_input("Enter post ID: ")
             await delete_post_command(post_id)
 
         # ---------------- COMMENTS ----------------
 
         elif choice == "9":
-            post_id = int(input("Enter post ID: "))
-            user_id = int(input("Enter user ID: "))
-            comment_text = input("Enter comment: ").strip()
+            post_id = get_integer_input("Enter post ID: ")
+            user_id = get_integer_input("Enter user ID: ")
+            comment_text = input("Enter comment: ")
 
             await add_comment(
                 post_id,
@@ -571,12 +774,12 @@ async def main():
             )
 
         elif choice == "10":
-            post_id = int(input("Enter post ID: "))
+            post_id = get_integer_input("Enter post ID: ")
             await show_comments(post_id)
 
         elif choice == "11":
-            comment_id = int(input("Enter comment ID: "))
-            comment_text = input("Enter new comment: ").strip()
+            comment_id = get_integer_input("Enter comment ID: ")
+            comment_text = input("Enter new comment: ")
 
             await update_comment_command(
                 comment_id,
@@ -584,14 +787,14 @@ async def main():
             )
 
         elif choice == "12":
-            comment_id = int(input("Enter comment ID: "))
+            comment_id = get_integer_input("Enter comment ID: ")
             await delete_comment_command(comment_id)
 
         # ---------------- REACTIONS ----------------
 
         elif choice == "13":
-            post_id = int(input("Enter post ID: "))
-            user_id = int(input("Enter user ID: "))
+            post_id = get_integer_input("Enter post ID: ")
+            user_id = get_integer_input("Enter user ID: ")
 
             await like_post(
                 post_id,
@@ -599,8 +802,8 @@ async def main():
             )
 
         elif choice == "14":
-            post_id = int(input("Enter post ID: "))
-            user_id = int(input("Enter user ID: "))
+            post_id = get_integer_input("Enter post ID: ")
+            user_id = get_integer_input("Enter user ID: ")
 
             await dislike_post(
                 post_id,
@@ -608,12 +811,12 @@ async def main():
             )
 
         elif choice == "15":
-            post_id = int(input("Enter post ID: "))
+            post_id = get_integer_input("Enter post ID: ")
             await view_reactions(post_id)
 
         elif choice == "16":
-            post_id = int(input("Enter post ID: "))
-            user_id = int(input("Enter user ID: "))
+            post_id = get_integer_input("Enter post ID: ")
+            user_id = get_integer_input("Enter user ID: ")
 
             await remove_reaction(
                 post_id,
@@ -632,7 +835,6 @@ async def main():
         else:
             print("Invalid choice. Please try again.")
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-
